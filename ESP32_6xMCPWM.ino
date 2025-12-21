@@ -1,8 +1,13 @@
 #include "driver/mcpwm_cap.h"
 #include <Preferences.h>
+#include "USB.h"
 
 #define NUM_CHANNELS 6
 Preferences prefs;
+
+#if !ARDUINO_USB_CDC_ON_BOOT
+USBCDC USBSerial;
+#endif
 
 #define VERSION "V1.1"
 //const size_t VERSION_SIZE = sizeof(VERSION);
@@ -103,7 +108,7 @@ void setDefaults() {
   columns_separator = ';';
   decimal_separator = ',';
   timeout_val = 500;
-  Serial.println(">> Hodnoty nastaveny na tovarni defaulty.");
+  USBSerial.println(">> Hodnoty nastaveny na tovarni defaulty.");
 }
 
 void loadSettings() {
@@ -116,7 +121,7 @@ void loadSettings() {
   }
 
   if (stored_ver != VERSION) {
-    Serial.printf("!!! ZMENA VERZE (%s -> %s). Inicializace defaultnich hodnot...\n", stored_ver.c_str(), VERSION);
+    USBSerial.printf("!!! ZMENA VERZE (%s -> %s). Inicializace defaultnich hodnot...\n", stored_ver.c_str(), VERSION);
     prefs.end();  // Zavřeme pro čtení
 
     // Nastavíme výchozí hodnoty (pokud by v proměnných bylo něco jiného)
@@ -140,7 +145,7 @@ void loadSettings() {
   decimal_separator = prefs.getChar("dsep", ',');
 
   prefs.end();
-  Serial.println("Konfigurace nactena (verze souhlasi).");
+  USBSerial.println("Konfigurace nactena (verze souhlasi).");
 }
 void saveSettings() {
   prefs.begin("pwm-cfg", false);
@@ -160,12 +165,17 @@ void saveSettings() {
   prefs.putChar("dsep", decimal_separator);
 
   prefs.end();
-  Serial.println(">> ULOZENO (Verze: " VERSION ")");
+  USBSerial.println(">> ULOZENO (Verze: " VERSION ")");
 }
 
 void setup() {
-  Serial.setTimeout(10);
-  Serial.begin(115200);
+  //Serial.setTimeout(10);
+  //Serial.begin(115200);
+  USB.begin();        // Inicializace USB fyzické vrstvy
+  USBSerial.begin();  // Inicializace sériového portu nad USB
+  USBSerial.setDebugOutput(true);
+  //USBSerial.setTxTimeoutMs(0);
+  USBSerial.setDebugOutput(true);
 
   loadSettings();
   pinMode(ERROR_PIN, OUTPUT);
@@ -203,73 +213,73 @@ void setup() {
     mcpwm_capture_timer_enable(cap_timers[g]);
     mcpwm_capture_timer_start(cap_timers[g]);
   }
-  Serial.print("Detekce PWM ");
-  Serial.println(VERSION);
+  delay(1000);
+  USBSerial.print("Detekce PWM ");
+  USBSerial.println(VERSION);
   tiskni_parametry();
-  Serial.println("HELP nebo ? nebo -h  : Vypise napovedu");
+  USBSerial.println("HELP nebo ? nebo -h  : Vypise napovedu");
 }
 
 void tiskni_parametry(void) {
-  Serial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska);
-  Serial.printf("Separatory: Sloupce='%c', Desetinny='%c'\n\n", columns_separator, decimal_separator);
+  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska);
+  USBSerial.printf("Separatory: Sloupce='%c', Desetinny='%c'\n\n", columns_separator, decimal_separator);
 }
 
 void tiskni_help() {
-  Serial.println("\n--- HARDWARE MAPOVANI ---");
+  USBSerial.println("\n--- HARDWARE MAPOVANI ---");
 
   // Výpis vstupních pinů (Capture)
-  Serial.print("VSTUPNI PINY (CH 0-5): ");
+  USBSerial.print("VSTUPNI PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
-    if (i > 0) Serial.print(", ");
-    Serial.print(INPUT_PINS[i]);
+    if (i > 0) USBSerial.print(", ");
+    USBSerial.print(INPUT_PINS[i]);
   }
-  Serial.println();
+  USBSerial.println();
 
   // Výpis výstupních pinů (Digital Out)
-  Serial.print("VYSTUPNI PINY (CH 0-5): ");
+  USBSerial.print("VYSTUPNI PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
-    if (i > 0) Serial.print(", ");
-    Serial.print(OUTPUT_PINS[i]);
+    if (i > 0) USBSerial.print(", ");
+    USBSerial.print(OUTPUT_PINS[i]);
   }
-  Serial.println();
+  USBSerial.println();
 
   // Výpis Error pinu
-  Serial.printf("ERROR PIN: %d\n", ERROR_PIN);
+  USBSerial.printf("ERROR PIN: %d\n", ERROR_PIN);
 
-  Serial.println("\n--- SEZNAM PRIKAZU ---");
-  Serial.println("SMIN=n, SMAX=n      : Nastaveni spinaciho okna (Hystereze v ISR)");
-  Serial.println("LMIN=n, LMAX=n      : Validacni okno pro LOW signal (Error counting)");
-  Serial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)");
-  Serial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
-  Serial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
+  USBSerial.println("\n--- SEZNAM PRIKAZU ---");
+  USBSerial.println("SMIN=n, SMAX=n      : Nastaveni spinaciho okna (Hystereze v ISR)");
+  USBSerial.println("LMIN=n, LMAX=n      : Validacni okno pro LOW signal (Error counting)");
+  USBSerial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)");
+  USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
+  USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
 
-  Serial.println("\n--- FORMATOVANI A MERENI ---");
-  Serial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
-  Serial.println("DECIMAL_SEPARATOR=c : Znak pro desetinou carku (napr. . nebo ,)");
-  Serial.println("*IDN?               : Vypise IDN");
-  Serial.println(":MEAS:PER?          : Vypise periody vsech kanalu [s]");
-  Serial.println(":MEAS:WID?          : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
+  USBSerial.println("\n--- FORMATOVANI A MERENI ---");
+  USBSerial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
+  USBSerial.println("DECIMAL_SEPARATOR=c : Znak pro desetinou carku (napr. . nebo ,)");
+  USBSerial.println("*IDN?               : Vypise IDN");
+  USBSerial.println(":MEAS:PER?          : Vypise periody vsech kanalu [s]");
+  USBSerial.println(":MEAS:WID?          : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
 
-  Serial.println("\n--- SYSTEMOVE ---");
-  Serial.println("SHOW                : Vypise aktualni nastaveni");
-  Serial.println("SAVE                : Ulozi aktualni hodnoty do pameti Flash");
-  Serial.println("FACTORY_RESET  *RST : Nastavi vychozi hodnoty a ulozi je");
-  Serial.println("HELP nebo ?  -h     : Vypise tuto napovedu");
-  Serial.println("-----------------------------------------------------------------------");
-  Serial.println("Prikazy lze retezit, napr: DECIMAL_SEPARATOR=, COLUMNS_SEPARATOR=; SAVE");
+  USBSerial.println("\n--- SYSTEMOVE ---");
+  USBSerial.println("SHOW                : Vypise aktualni nastaveni");
+  USBSerial.println("SAVE                : Ulozi aktualni hodnoty do pameti Flash");
+  USBSerial.println("FACTORY_RESET  *RST : Nastavi vychozi hodnoty a ulozi je");
+  USBSerial.println("HELP nebo ?  -h     : Vypise tuto napovedu");
+  USBSerial.println("-----------------------------------------------------------------------");
+  USBSerial.println("Prikazy lze retezit, napr: DECIMAL_SEPARATOR=, COLUMNS_SEPARATOR=; SAVE");
 
   // Vypíšeme i aktuální stav
-  Serial.print("\nAKTUALNI STAV: ");
+  USBSerial.print("\nAKTUALNI STAV: ");
   tiskni_parametry();
 }
 
 void loop() {
   unsigned long nyni = millis();
-  
-  //if (!Serial) { delay(1); }
-  // 1. SÉRIOVÉ PŘÍKAZY
-  if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');
+
+  if (USBSerial.available()) {
+    // Čteme z USBSerial místo Serial
+    String input = USBSerial.readStringUntil('\n');
     input.trim();
     if (input.length() == 0) return;
 
@@ -330,13 +340,13 @@ void loop() {
         } else if (key == "COLUMNS_SEPARATOR") {
           if (valStr.length() > 0) {
             columns_separator = valStr[0];
-            Serial.printf("OK: Separator nastaven na '%c'\n", columns_separator);
+            USBSerial.printf("OK: Separator nastaven na '%c'\n", columns_separator);
             platny_token = true;
           }
         } else if (key == "DECIMAL_SEPARATOR") {
           if (valStr.length() > 0) {
             decimal_separator = valStr[0];
-            Serial.printf("OK: Desetinny oddelovac nastaven na '%c'\n", decimal_separator);
+            USBSerial.printf("OK: Desetinny oddelovac nastaven na '%c'\n", decimal_separator);
             platny_token = true;
           }
         }
@@ -354,64 +364,64 @@ void loop() {
           setDefaults();
           saveSettings();
           platny_token = true;
-          Serial.println("OK: Proveden kompletni reset nastaveni.");
+          USBSerial.println("OK: Proveden kompletni reset nastaveni.");
         } else if (token == "*IDN?") {
           platny_token = true;
-          Serial.printf("Detekce az 6 kanalu PWM s ESP32-S3 %s\n", VERSION);
+          USBSerial.printf("Detekce az 6 kanalu PWM s ESP32-S3 %s\n", VERSION);
         } else if (token == ":MEAS:PER?" || token == ":MEASURE:PERIOD?") {
-          if (Serial && Serial.availableForWrite() > 64) {
-            for (int i = 0; i < NUM_CHANNELS; i++) {
-              // Čteme přímo z paměti stavu kanálu, ne z fronty
-              uint32_t p_us = chStates[i].last_period_us;
 
-              // Pokud je kanál v timeoutu (signál zmizel), vynulujeme to
-              if (nyni - chStates[i].last_seen > timeout_val) {
-                p_us = 0;
-              }
+          for (int i = 0; i < NUM_CHANNELS; i++) {
+            // Čteme přímo z paměti stavu kanálu, ne z fronty
+            uint32_t p_us = chStates[i].last_period_us;
 
-              float p_sec = p_us / 1000000.0f;
-              String s_val = String(p_sec, 6);
-              s_val.replace('.', decimal_separator);
-
-              Serial.print(s_val);
-
-              if (i < NUM_CHANNELS - 1) {
-                Serial.print(columns_separator);
-                if (columns_separator == ';') Serial.print(" ");
-              }
+            // Pokud je kanál v timeoutu (signál zmizel), vynulujeme to
+            if (nyni - chStates[i].last_seen > timeout_val) {
+              p_us = 0;
             }
-            Serial.println();
+
+            float p_sec = p_us / 1000000.0f;
+            String s_val = String(p_sec, 6);
+            s_val.replace('.', decimal_separator);
+
+            USBSerial.print(s_val);
+
+            if (i < NUM_CHANNELS - 1) {
+              USBSerial.print(columns_separator);
+              if (columns_separator == ';') USBSerial.print(" ");
+            }
           }
+          USBSerial.println();
+
           platny_token = true;
         } else if (token == ":MEAS:WID?" || token == ":MEASURE:WIDTH?") {
-          if (Serial && Serial.availableForWrite() > 64) {
-            for (int i = 0; i < NUM_CHANNELS; i++) {
-              uint32_t w_us = chStates[i].last_width_us;
 
-              // Timeout pojistka
-              if (nyni - chStates[i].last_seen > timeout_val) {
-                w_us = 0;
-              }
+          for (int i = 0; i < NUM_CHANNELS; i++) {
+            uint32_t w_us = chStates[i].last_width_us;
 
-              float w_sec = w_us / 1000000.0f;
-              String s_val = String(w_sec, 6);
-              s_val.replace('.', decimal_separator);
-
-              Serial.print(s_val);
-
-              if (i < NUM_CHANNELS - 1) {
-                Serial.print(columns_separator);
-                if (columns_separator == ';') Serial.print(" ");
-              }
+            // Timeout pojistka
+            if (nyni - chStates[i].last_seen > timeout_val) {
+              w_us = 0;
             }
-            Serial.println();
+
+            float w_sec = w_us / 1000000.0f;
+            String s_val = String(w_sec, 6);
+            s_val.replace('.', decimal_separator);
+
+            USBSerial.print(s_val);
+
+            if (i < NUM_CHANNELS - 1) {
+              USBSerial.print(columns_separator);
+              if (columns_separator == ';') USBSerial.print(" ");
+            }
           }
+          USBSerial.println();
+
           platny_token = true;
         }
       }
 
       if (!platny_token) {
-        Serial.printf("Neznamy prikaz: %s\n", p);
+        USBSerial.printf("Neznamy prikaz: %s\n", p);
         neznama_vyskyt = true;
       }
       p = strtok(NULL, " ");
@@ -425,15 +435,15 @@ void loop() {
     bool valid = true;
     if (neco_zmeneno) {
       if (n_smin >= n_smax) {
-        Serial.println("CHYBA: SMIN >= SMAX!");
+        USBSerial.println("CHYBA: SMIN >= SMAX!");
         valid = false;
       }
       if (n_lmin >= n_lmax) {
-        Serial.println("CHYBA: LMIN >= LMAX!");
+        USBSerial.println("CHYBA: LMIN >= LMAX!");
         valid = false;
       }
       if (n_hmin >= n_hmax) {
-        Serial.println("CHYBA: HMIN >= HMAX!");
+        USBSerial.println("CHYBA: HMIN >= HMAX!");
         valid = false;
       }
     }
@@ -447,11 +457,11 @@ void loop() {
       e_high_max = n_hmax;
       e_maska = n_emask;
 
-      if (neco_zmeneno) Serial.println("OK: Hodnoty aktualizovany.");
+      if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
       if (do_show) tiskni_parametry();  // Předpokládám, že tiskni_parametry je vaše SHOW funkce
     } else if (!valid) {
-      Serial.println("Zmeny zamitnuty.");
+      USBSerial.println("Zmeny zamitnuty.");
     }
   }
   //********************************************************************************************************
