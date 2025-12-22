@@ -32,6 +32,9 @@ struct ChannelState {
 const int INPUT_PINS[NUM_CHANNELS] = { 4, 5, 6, 7, 15, 16 };
 const int OUTPUT_PINS[NUM_CHANNELS] = { 10, 11, 12, 13, 1, 2 };
 const int ERROR_PIN = 21;
+// Seznam zbývajících volných pinů pro EMC stabilitu
+const int UNUSED_PINS[] = {17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36, 35, 45, 48, 47};
+//const int UNUSED_PINS[] = {3, 8, 9, 14, 17, 18, 33, 34, 35, 36, 37, 38, 43, 44, 45, 46, 47, 48};
 
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
@@ -168,9 +171,14 @@ void saveSettings() {
   USBSerial.println(">> ULOZENO (Verze: " VERSION ")");
 }
 
+
 void setup() {
-  //Serial.setTimeout(10);
-  //Serial.begin(115200);
+  // 1. EMC Ošetření nepoužitých pinů
+  for (int i = 0; i < sizeof(UNUSED_PINS) / sizeof(int); i++) {
+    pinMode(UNUSED_PINS[i], OUTPUT);
+    digitalWrite(UNUSED_PINS[i], LOW);
+  }
+
   USB.begin();        // Inicializace USB fyzické vrstvy
   USBSerial.begin();  // Inicializace sériového portu nad USB
   USBSerial.setDebugOutput(true);
@@ -204,6 +212,13 @@ void setup() {
     c_cfg.flags.pull_down = 0;
 
     mcpwm_new_capture_channel(cap_timers[g_idx], &c_cfg, &cap_chan);
+    
+    // mcpwm_capture_filter_config_t filter_config = {
+    //     .resolution_hz = 80000000, // 80 MHz rozlišení (1 tik = 12.5 ns)
+    //     .max_glitch_ns = 500,      // Ignoruje pulzy kratší než 500 ns
+    // };
+    // mcpwm_capture_channel_set_filter(cap_chan, &filter_cfg);
+
     mcpwm_capture_event_callbacks_t cbs = { .on_cap = on_capture_callback };
     mcpwm_capture_channel_register_event_callbacks(cap_chan, &cbs, (void *)i);
     mcpwm_capture_channel_enable(cap_chan);
@@ -229,9 +244,10 @@ void tiskni_help() {
   USBSerial.println("\n--- HARDWARE MAPOVANI ---");
 
   // Výpis vstupních pinů (Capture)
-  USBSerial.print("VSTUPNI PINY (CH 0-5): ");
+  USBSerial.print("VSTUPNI  PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
     if (i > 0) USBSerial.print(", ");
+    if (INPUT_PINS[i] < 10 ) USBSerial.print(" ");
     USBSerial.print(INPUT_PINS[i]);
   }
   USBSerial.println();
@@ -240,6 +256,7 @@ void tiskni_help() {
   USBSerial.print("VYSTUPNI PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
     if (i > 0) USBSerial.print(", ");
+    if (OUTPUT_PINS[i] < 10 ) USBSerial.print(" ");
     USBSerial.print(OUTPUT_PINS[i]);
   }
   USBSerial.println();
