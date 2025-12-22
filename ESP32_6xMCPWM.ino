@@ -9,7 +9,7 @@ Preferences prefs;
 USBCDC USBSerial;
 #endif
 
-#define VERSION "V1.2"
+#define VERSION "V1.1"
 //const size_t VERSION_SIZE = sizeof(VERSION);
 
 // --- STRUKTURY ---
@@ -39,7 +39,7 @@ const int UNUSED_PINS[] = { 17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36,
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
 
-uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time;
+uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity;
 bool invert_logic = false;
 char columns_separator = ';';
 char decimal_separator = ',';
@@ -120,7 +120,8 @@ void setDefaults() {
   e_low_max = 8000;
   e_high_min = 12000;
   e_high_max = 15000;
-  e_min_time = 800;   
+  e_min_time = 800;  
+  e_quantity = 1; 
   invert_logic = false;
   e_maska = 1;
   columns_separator = ';';
@@ -158,6 +159,7 @@ void loadSettings() {
   e_high_min = prefs.getUInt("hmin", 12000);
   e_high_max = prefs.getUInt("hmax", 15000);
   e_min_time = prefs.getUInt("etim", 800);
+  e_quantity = prefs.getUInt("equn", 800);
   invert_logic = prefs.getBool("inv", false);
   e_maska = prefs.getUInt("emas", 1);
   columns_separator = prefs.getChar("csep", ';');
@@ -179,6 +181,7 @@ void saveSettings() {
   prefs.putUInt("hmin", e_high_min);
   prefs.putUInt("hmax", e_high_max);
   prefs.putUInt("etim", e_min_time);
+  prefs.putUInt("equn", e_quantity);
   prefs.putBool("inv", invert_logic);
   prefs.putUInt("emas", e_maska);
   prefs.putChar("csep", columns_separator);
@@ -246,7 +249,7 @@ void setup() {
 }
 
 void tiskni_parametry(void) {
-  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d E_MIN_TIME:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time);
+  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d E_MIN_TIME:%d E_QUNTITY:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity);
   USBSerial.printf("Separatory: Sloupce='%c', Desetinny='%c'\n\n", columns_separator, decimal_separator);
 }
 
@@ -281,6 +284,7 @@ void tiskni_help() {
   USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
   USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
   USBSerial.println("ETIME=n             : minimální počet ms indikace erroru");
+  USBSerial.println("EQUNT=n             : minimální počet za sebou jdoucích detekci erroru než se nastaví ERROR PIN");
 
   USBSerial.println("\n--- FORMATOVANI A MERENI ---");
   USBSerial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
@@ -317,7 +321,7 @@ void loop() {
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
-    uint32_t n_emask = e_maska, n_e_min_time = e_min_time;
+    uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_e_quantity = e_quantity;
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
     bool neznama_vyskyt = false;
 
@@ -359,6 +363,10 @@ void loop() {
           neco_zmeneno = true;
         } else if (key == "ETIME") {
           n_e_min_time = val;
+          platny_token = true;
+          neco_zmeneno = true;
+        } else if (key == "EQUNT") {
+          n_e_quantity = val;
           platny_token = true;
           neco_zmeneno = true;
         } else if (key == "INVERT") {
@@ -489,6 +497,7 @@ void loop() {
       e_high_max = n_hmax;
       e_maska = n_emask;
       e_min_time = n_e_min_time;
+      e_quantity = n_e_quantity;
 
       if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
