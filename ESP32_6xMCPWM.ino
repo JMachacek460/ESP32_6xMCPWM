@@ -9,7 +9,7 @@ Preferences prefs;
 USBCDC USBSerial;
 #endif
 
-#define VERSION "V1.1"
+#define VERSION "V1.2"
 //const size_t VERSION_SIZE = sizeof(VERSION);
 
 // --- STRUKTURY ---
@@ -33,13 +33,13 @@ const int INPUT_PINS[NUM_CHANNELS] = { 4, 5, 6, 7, 15, 16 };
 const int OUTPUT_PINS[NUM_CHANNELS] = { 10, 11, 12, 13, 1, 2 };
 const int ERROR_PIN = 21;
 // Seznam zbývajících volných pinů pro EMC stabilitu
-const int UNUSED_PINS[] = {17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36, 35, 45, 48, 47};
+const int UNUSED_PINS[] = { 17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36, 35, 45, 48, 47 };
 //const int UNUSED_PINS[] = {3, 8, 9, 14, 17, 18, 33, 34, 35, 36, 37, 38, 43, 44, 45, 46, 47, 48};
 
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
 
-uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska;
+uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time;
 bool invert_logic = false;
 char columns_separator = ';';
 char decimal_separator = ',';
@@ -53,8 +53,8 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
   int ch = (int)user_data;
   uint32_t now = edata->cap_value;
 
-// Statické pole pro uložení času POSLEDNÍ JAKÉKOLIV hrany pro každý kanál
-  static uint32_t last_any_edge[NUM_CHANNELS] = {0};
+  // Statické pole pro uložení času POSLEDNÍ JAKÉKOLIV hrany pro každý kanál
+  static uint32_t last_any_edge[NUM_CHANNELS] = { 0 };
 
   // Výpočet rozdílu v tiktech (80 tiků = 1us)
   // Ošetření přetečení 32-bitového čítače
@@ -63,7 +63,7 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
   // FILTR: Pokud je změna stavu příliš rychlá (méně než 1us), ignoruj ji.
   // To odfiltruje kmity, které prošly přes optočlen nebo RC filtr.
   if (diff < 80) {
-    return false; 
+    return false;
   }
   last_any_edge[ch] = now;
 
@@ -120,6 +120,7 @@ void setDefaults() {
   e_low_max = 8000;
   e_high_min = 12000;
   e_high_max = 15000;
+  e_min_time = 800;   
   invert_logic = false;
   e_maska = 1;
   columns_separator = ';';
@@ -156,6 +157,7 @@ void loadSettings() {
   e_low_max = prefs.getUInt("lmax", 8000);
   e_high_min = prefs.getUInt("hmin", 12000);
   e_high_max = prefs.getUInt("hmax", 15000);
+  e_min_time = prefs.getUInt("etim", 800);
   invert_logic = prefs.getBool("inv", false);
   e_maska = prefs.getUInt("emas", 1);
   columns_separator = prefs.getChar("csep", ';');
@@ -176,6 +178,7 @@ void saveSettings() {
   prefs.putUInt("lmax", e_low_max);
   prefs.putUInt("hmin", e_high_min);
   prefs.putUInt("hmax", e_high_max);
+  prefs.putUInt("etim", e_min_time);
   prefs.putBool("inv", invert_logic);
   prefs.putUInt("emas", e_maska);
   prefs.putChar("csep", columns_separator);
@@ -226,13 +229,6 @@ void setup() {
     c_cfg.flags.pull_down = 0;
 
     mcpwm_new_capture_channel(cap_timers[g_idx], &c_cfg, &cap_chan);
-    
-    // mcpwm_capture_filter_config_t filter_config = {
-    //     .resolution_hz = 80000000, // 80 MHz rozlišení (1 tik = 12.5 ns)
-    //     .max_glitch_ns = 500,      // Ignoruje pulzy kratší než 500 ns
-    // };
-    // mcpwm_capture_channel_set_filter(cap_chan, &filter_cfg);
-
     mcpwm_capture_event_callbacks_t cbs = { .on_cap = on_capture_callback };
     mcpwm_capture_channel_register_event_callbacks(cap_chan, &cbs, (void *)i);
     mcpwm_capture_channel_enable(cap_chan);
@@ -250,7 +246,7 @@ void setup() {
 }
 
 void tiskni_parametry(void) {
-  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska);
+  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d E_MIN_TIME:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time);
   USBSerial.printf("Separatory: Sloupce='%c', Desetinny='%c'\n\n", columns_separator, decimal_separator);
 }
 
@@ -261,7 +257,7 @@ void tiskni_help() {
   USBSerial.print("VSTUPNI  PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
     if (i > 0) USBSerial.print(", ");
-    if (INPUT_PINS[i] < 10 ) USBSerial.print(" ");
+    if (INPUT_PINS[i] < 10) USBSerial.print(" ");
     USBSerial.print(INPUT_PINS[i]);
   }
   USBSerial.println();
@@ -270,7 +266,7 @@ void tiskni_help() {
   USBSerial.print("VYSTUPNI PINY (CH 0-5): ");
   for (int i = 0; i < NUM_CHANNELS; i++) {
     if (i > 0) USBSerial.print(", ");
-    if (OUTPUT_PINS[i] < 10 ) USBSerial.print(" ");
+    if (OUTPUT_PINS[i] < 10) USBSerial.print(" ");
     USBSerial.print(OUTPUT_PINS[i]);
   }
   USBSerial.println();
@@ -284,6 +280,7 @@ void tiskni_help() {
   USBSerial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)");
   USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
   USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
+  USBSerial.println("ETIME=n             : minimální počet ms indikace erroru");
 
   USBSerial.println("\n--- FORMATOVANI A MERENI ---");
   USBSerial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
@@ -320,7 +317,7 @@ void loop() {
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
-    uint32_t n_emask = e_maska;
+    uint32_t n_emask = e_maska, n_e_min_time = e_min_time;
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
     bool neznama_vyskyt = false;
 
@@ -358,6 +355,10 @@ void loop() {
           neco_zmeneno = true;
         } else if (key == "HMAX") {
           n_hmax = val;
+          platny_token = true;
+          neco_zmeneno = true;
+        } else if (key == "ETIME") {
+          n_e_min_time = val;
           platny_token = true;
           neco_zmeneno = true;
         } else if (key == "INVERT") {
@@ -487,6 +488,7 @@ void loop() {
       e_high_min = n_hmin;
       e_high_max = n_hmax;
       e_maska = n_emask;
+      e_min_time = n_e_min_time;
 
       if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
@@ -496,6 +498,7 @@ void loop() {
     }
   }
   //********************************************************************************************************
+  // 2. KONTROLA DAT Z FRONTY
   nyni = millis();
   bool any_err = false;
   PwmData data;
@@ -537,16 +540,20 @@ void loop() {
   }
 
   // Alarm
-  if (any_err) {
-    if (!alarm_active) {
-      digitalWrite(ERROR_PIN, HIGH);
-      alarm_active = true;
-      alarm_start = nyni;
-    }
-  } else if (alarm_active && (nyni - alarm_start > 800)) {
-    digitalWrite(ERROR_PIN, LOW);
-    alarm_active = false;
-  }
+  // 3. PERIODICKÉ ÚLOHY
+  static unsigned long last_slow_task = 0;
+  if (nyni - last_slow_task >= 50) {  // Spustí se každých 50 ms
+    last_slow_task = nyni;
 
-  delay(10);
+    if (any_err) {
+      if (!alarm_active) {
+        digitalWrite(ERROR_PIN, HIGH);
+        alarm_active = true;
+        alarm_start = nyni;
+      }
+    } else if (alarm_active && (nyni - alarm_start > e_min_time)) {
+      digitalWrite(ERROR_PIN, LOW);
+      alarm_active = false;
+    }
+  }
 }
