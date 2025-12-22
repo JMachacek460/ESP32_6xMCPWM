@@ -286,8 +286,8 @@ void tiskni_help() {
   USBSerial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)");
   USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
   USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
-  USBSerial.println("ETIME=n             : minimální počet ms indikace erroru");
-  USBSerial.println("EQUNT=n             : minimální počet za sebou jdoucích detekci erroru než se nastaví ERROR PIN");
+  USBSerial.println("EQUNT=n             : Min pocet za sebou jdoucich detekci erroru nez se nastavi ERROR PIN (255-OFF)");
+  USBSerial.println("ETIME=n             : Min pocet [ms] indikace erroru");
 
   USBSerial.println("\n--- FORMATOVANI A MERENI ---");
   USBSerial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
@@ -308,6 +308,18 @@ void tiskni_help() {
   USBSerial.print("\nAKTUALNI STAV: ");
   tiskni_parametry();
 }
+
+template<typename T>
+void validateAndSet(T &target, long val, long min, long max, const char *name, bool &changed, bool &valid) {
+  if (val >= min && val <= max) {
+    target = (T)val;  // Přetypování na cílový typ (např. uint8_t)
+    changed = true;
+  } else {
+    USBSerial.printf("CHYBA: %s=%ld mimo rozsah (%ld-%ld)\n", name, val, min, max);
+    valid = false;
+  }
+}
+
 
 void loop() {
   unsigned long nyni = millis();
@@ -330,6 +342,7 @@ void loop() {
     bool neznama_vyskyt = false;
     bool valid = true;
     char *p = strtok(buf, " ");
+
     while (p != NULL) {
       String token = String(p);
       token.toUpperCase();
@@ -344,90 +357,34 @@ void loop() {
 
         if (key == "SMIN") {
           platny_token = true;
-          if (val >= 0 && val <= 1000000) {
-            n_smin = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: SMIN %ld mimo rozsah (0-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_smin, val, 0, 1000000, "SMIN", neco_zmeneno, valid);
         } else if (key == "SMAX") {
           platny_token = true;
-          if (val >= 1 && val <= 1000000) {
-            n_smax = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: SMAX %ld mimo rozsah (1-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_smax, val, 1, 1000000, "SMAX", neco_zmeneno, valid);
         } else if (key == "LMIN") {
           platny_token = true;
-          if (val >= 0 && val <= 1000000) {
-            n_lmin = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: LMIN %ld mimo rozsah (0-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_lmin, val, 0, 1000000, "LMIN", neco_zmeneno, valid);
         } else if (key == "LMAX") {
           platny_token = true;
-          if (val >= 1 && val <= 1000000) {
-            n_lmax = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: LMAX %ld mimo rozsah (1-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_lmax, val, 1, 1000000, "LMAX", neco_zmeneno, valid);
         } else if (key == "HMIN") {
           platny_token = true;
-          if (val >= 0 && val <= 1000000) {
-            n_hmin = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: HMIN %ld mimo rozsah (0-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_hmin, val, 0, 1000000, "HMIN", neco_zmeneno, valid);
         } else if (key == "HMAX") {
           platny_token = true;
-          if (val >= 1 && val <= 1000000) {
-            n_hmax = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: HMAX %ld mimo rozsah (1-1M)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_hmax, val, 1, 1000000, "HMAX", neco_zmeneno, valid);
         } else if (key == "ETIME") {
           platny_token = true;
-          if (val >= 0 && val <= 10000) {
-            n_e_min_time = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: ETIME %ld mimo rozsah (0-10k)\n", val);
-            valid = false;
-          }
+          validateAndSet(n_e_min_time, val, 1, 10000, "ETIME", neco_zmeneno, valid);
         } else if (key == "EQUNT") {
           platny_token = true;
-          // Tady ošetříme uint8_t
-          if (val >= 0 && val <= 255) {
-            n_e_quantity = (uint8_t)val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: EQUNT %ld mimo rozsah (0-255)\n", val);
-            valid = false;
-          }
-        } else if (key == "INVERT") {
-          invert_logic = (val == 1);
+          validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
+        } else if (key == "EQUNT") {
           platny_token = true;
-          neco_zmeneno = true;
+          validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
         } else if (key == "EMASK") {
           platny_token = true;
-          if (val >= 0 && val <= 63) {
-            n_emask = val;
-            neco_zmeneno = true;
-          } else {
-            USBSerial.printf("CHYBA: EMASK %ld musí být 0-63\n", val);
-            valid = false;
-          }
+          validateAndSet(n_emask, val, 0, 63, "EMASK", neco_zmeneno, valid);
         } else if (key == "COLUMNS_SEPARATOR") {
           if (valStr.length() > 0) {
             columns_separator = valStr[0];
