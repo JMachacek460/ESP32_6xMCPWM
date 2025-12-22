@@ -51,9 +51,23 @@ unsigned long alarm_start = 0;
 // --- ISR CALLBACK (Plnění fronty) ---
 static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm_capture_event_data_t *edata, void *user_data) {
   int ch = (int)user_data;
-  BaseType_t high_task_wakeup = pdFALSE;
   uint32_t now = edata->cap_value;
 
+// Statické pole pro uložení času POSLEDNÍ JAKÉKOLIV hrany pro každý kanál
+  static uint32_t last_any_edge[NUM_CHANNELS] = {0};
+
+  // Výpočet rozdílu v tiktech (80 tiků = 1us)
+  // Ošetření přetečení 32-bitového čítače
+  uint32_t diff = (now >= last_any_edge[ch]) ? (now - last_any_edge[ch]) : (0xFFFFFFFF - last_any_edge[ch] + now);
+
+  // FILTR: Pokud je změna stavu příliš rychlá (méně než 1us), ignoruj ji.
+  // To odfiltruje kmity, které prošly přes optočlen nebo RC filtr.
+  if (diff < 80) {
+    return false; 
+  }
+  last_any_edge[ch] = now;
+
+  BaseType_t high_task_wakeup = pdFALSE;
   if (edata->cap_edge == MCPWM_CAP_EDGE_POS) {
     uint32_t period_ticks = now - chStates[ch].pos_temp;
     uint32_t low_ticks = now - chStates[ch].neg_temp;
