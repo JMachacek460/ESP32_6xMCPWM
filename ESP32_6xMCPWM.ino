@@ -28,6 +28,8 @@ struct ChannelState {
   uint32_t last_width_us;
 };
 
+#define MAX_ERROR_COUNT 255
+
 // --- GLOBÁLNÍ PROMĚNNÉ ---
 const int INPUT_PINS[NUM_CHANNELS] = { 4, 5, 6, 7, 15, 16 };
 const int OUTPUT_PINS[NUM_CHANNELS] = { 10, 11, 12, 13, 1, 2 };
@@ -39,7 +41,8 @@ const int UNUSED_PINS[] = { 17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36,
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
 
-uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity;
+uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time;
+uint8_t e_quantity;
 bool invert_logic = false;
 char columns_separator = ';';
 char decimal_separator = ',';
@@ -120,8 +123,8 @@ void setDefaults() {
   e_low_max = 8000;
   e_high_min = 12000;
   e_high_max = 15000;
-  e_min_time = 800;  
-  e_quantity = 1; 
+  e_min_time = 800;
+  e_quantity = 1;
   invert_logic = false;
   e_maska = 1;
   columns_separator = ';';
@@ -308,9 +311,9 @@ void tiskni_help() {
 
 void loop() {
   unsigned long nyni = millis();
-
+  // 1. SERIOVA LINKA
   if (USBSerial.available()) {
-    // Čteme z USBSerial místo Serial
+    // USBSerial místo Serial
     String input = USBSerial.readStringUntil('\n');
     input.trim();
     if (input.length() == 0) return;
@@ -321,10 +324,11 @@ void loop() {
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
-    uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_e_quantity = e_quantity;
+    uint32_t n_emask = e_maska, n_e_min_time = e_min_time;
+    uint8_t n_e_quantity = e_quantity;
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
     bool neznama_vyskyt = false;
-
+    bool valid = true;
     char *p = strtok(buf, " ");
     while (p != NULL) {
       String token = String(p);
@@ -332,51 +336,98 @@ void loop() {
       bool platny_token = false;
 
       int sep = token.indexOf('=');
+
       if (sep != -1) {
         String key = token.substring(0, sep);
         String valStr = token.substring(sep + 1);
         uint32_t val = valStr.toInt();
 
         if (key == "SMIN") {
-          n_smin = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 0 && val <= 1000000) {
+            n_smin = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: SMIN %ld mimo rozsah (0-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "SMAX") {
-          n_smax = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 1 && val <= 1000000) {
+            n_smax = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: SMAX %ld mimo rozsah (1-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "LMIN") {
-          n_lmin = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 0 && val <= 1000000) {
+            n_lmin = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: LMIN %ld mimo rozsah (0-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "LMAX") {
-          n_lmax = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 1 && val <= 1000000) {
+            n_lmax = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: LMAX %ld mimo rozsah (1-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "HMIN") {
-          n_hmin = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 0 && val <= 1000000) {
+            n_hmin = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: HMIN %ld mimo rozsah (0-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "HMAX") {
-          n_hmax = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 1 && val <= 1000000) {
+            n_hmax = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: HMAX %ld mimo rozsah (1-1M)\n", val);
+            valid = false;
+          }
         } else if (key == "ETIME") {
-          n_e_min_time = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 0 && val <= 10000) {
+            n_e_min_time = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: ETIME %ld mimo rozsah (0-10k)\n", val);
+            valid = false;
+          }
         } else if (key == "EQUNT") {
-          n_e_quantity = val;
           platny_token = true;
-          neco_zmeneno = true;
+          // Tady ošetříme uint8_t
+          if (val >= 0 && val <= 255) {
+            n_e_quantity = (uint8_t)val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: EQUNT %ld mimo rozsah (0-255)\n", val);
+            valid = false;
+          }
         } else if (key == "INVERT") {
           invert_logic = (val == 1);
           platny_token = true;
           neco_zmeneno = true;
         } else if (key == "EMASK") {
-          n_emask = val;
           platny_token = true;
-          neco_zmeneno = true;
+          if (val >= 0 && val <= 63) {
+            n_emask = val;
+            neco_zmeneno = true;
+          } else {
+            USBSerial.printf("CHYBA: EMASK %ld musí být 0-63\n", val);
+            valid = false;
+          }
         } else if (key == "COLUMNS_SEPARATOR") {
           if (valStr.length() > 0) {
             columns_separator = valStr[0];
@@ -472,7 +523,7 @@ void loop() {
       return;
     }
 
-    bool valid = true;
+
     if (neco_zmeneno) {
       if (n_smin >= n_smax) {
         USBSerial.println("CHYBA: SMIN >= SMAX!");
@@ -521,9 +572,9 @@ void loop() {
       // Validace
       bool valid = (val >= e_low_min && val <= e_low_max) || (val >= e_high_min && val <= e_high_max);
       if (valid) {
-        if (chStates[i].error_count > 0) chStates[i].error_count--;
+        if (chStates[i].error_count > 0) chStates[i].error_count = 0;  //chStates[i].error_count--
       } else {
-        if (chStates[i].error_count < 20) chStates[i].error_count++;
+        if (chStates[i].error_count < MAX_ERROR_COUNT) chStates[i].error_count++;
       }
 
       static unsigned long last_log = 0;
@@ -538,10 +589,10 @@ void loop() {
           digitalWrite(OUTPUT_PINS[i], LOW);
           log_w("CH%d: Timeout", i);
         }
-        chStates[i].error_count = 20;
+        chStates[i].error_count = MAX_ERROR_COUNT;
       }
     }
-    if (chStates[i].error_count > 5) {
+    if (chStates[i].error_count > e_quantity) {
       if ((e_maska >> i) & 1) {
         any_err = true;
       }
