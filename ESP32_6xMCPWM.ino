@@ -9,7 +9,7 @@ Preferences prefs;
 USBCDC USBSerial;
 #endif
 
-#define VERSION "V1.1"
+#define VERSION "V1.2"
 //const size_t VERSION_SIZE = sizeof(VERSION);
 
 // --- STRUKTURY ---
@@ -117,19 +117,21 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
 
 // --- PAMĚŤ A NASTAVENÍ ---
 void setDefaults() {
-  s_min = 8000;
-  s_max = 12000;
-  e_low_min = 5000;
-  e_low_max = 8000;
-  e_high_min = 12000;
-  e_high_max = 15000;
-  e_min_time = 800;
-  e_quantity = 1;
-  invert_logic = false;
-  e_maska = 1;
+  s_min = 8000;          // [us]
+  s_max = 12000;         // [us]
+  e_low_min = 5000;      // [us]
+  e_low_max = 8000;      // [us]
+  e_high_min = 12000;    // [us]
+  e_high_max = 15000;    // [us]
+  e_min_time = 800;      // [ms]
+  e_quantity = 1;        // [0-255]
+  e_maska = 1;           // [0-63]
+  invert_logic = false;  // [0-1]
+  timeout_val = 500;     // [ms]
+
   columns_separator = ';';
   decimal_separator = ',';
-  timeout_val = 500;
+
   USBSerial.println(">> Hodnoty nastaveny na tovarni defaulty.");
 }
 
@@ -165,6 +167,7 @@ void loadSettings() {
   e_quantity = prefs.getUInt("equn", 800);
   invert_logic = prefs.getBool("inv", false);
   e_maska = prefs.getUInt("emas", 1);
+  timeout_val = prefs.getUInt("tout", 500);
   columns_separator = prefs.getChar("csep", ';');
   decimal_separator = prefs.getChar("dsep", ',');
 
@@ -187,11 +190,95 @@ void saveSettings() {
   prefs.putUInt("equn", e_quantity);
   prefs.putBool("inv", invert_logic);
   prefs.putUInt("emas", e_maska);
+  prefs.putUInt("tout", timeout_val);
   prefs.putChar("csep", columns_separator);
   prefs.putChar("dsep", decimal_separator);
 
   prefs.end();
   USBSerial.println(">> ULOZENO (Verze: " VERSION ")");
+}
+
+
+
+void tiskni_help() {
+  USBSerial.println("\n--- HARDWARE MAPOVANI ---");
+
+  // Výpis vstupních pinů (Capture)
+  USBSerial.print("VSTUPNI  PINY (CH 0-5): ");
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    if (i > 0) USBSerial.print(", ");
+    if (INPUT_PINS[i] < 10) USBSerial.print(" ");
+    USBSerial.print(INPUT_PINS[i]);
+  }
+  USBSerial.println();
+
+  // Výpis výstupních pinů (Digital Out)
+  USBSerial.print("VYSTUPNI PINY (CH 0-5): ");
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    if (i > 0) USBSerial.print(", ");
+    if (OUTPUT_PINS[i] < 10) USBSerial.print(" ");
+    USBSerial.print(OUTPUT_PINS[i]);
+  }
+  USBSerial.println();
+
+  // Výpis Error pinu
+  USBSerial.printf("ERROR PIN: %d\n", ERROR_PIN);
+
+  USBSerial.println("\n--- SEZNAM PRIKAZU ---");
+  USBSerial.println("SMIN=n, SMAX=n      : Nastaveni spinaciho okna (Hystereze v ISR)[us]");
+  USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
+  USBSerial.println("LMIN=n, LMAX=n      : Validacni okno pro LOW signal (Error counting)[us]");
+  USBSerial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)[us]");
+  USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
+  USBSerial.println("EQUNT=n             : Min pocet za sebou jdoucich detekci erroru nez se nastavi ERROR PIN (255-OFF)");
+  USBSerial.println("ETIME=n             : Min pocet [ms] indikace erroru");
+  USBSerial.println("ETOUT=n             : Doba za jak dlouho bez signalu se vyhodnoti error a uz se na nic neceka [ms]");
+
+  USBSerial.println("\n--- FORMATOVANI A MERENI ---");
+  USBSerial.println("COLUMNS_SEPARATOR=c CSEP=n : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
+  USBSerial.println("DECIMAL_SEPARATOR=c DSEP=n : Znak pro desetinou carku (napr. . nebo ,)\n");
+  USBSerial.println("*IDN?               : Vypise IDN");
+  USBSerial.println(":MEAS:PER?          : Vypise periody vsech kanalu [s]");
+  USBSerial.println(":MEAS:WID?          : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
+
+  USBSerial.println("\n--- SYSTEMOVE ---");
+  USBSerial.println("SHOW                : Vypise aktualni nastaveni");
+  USBSerial.println("SAVE                : Ulozi aktualni hodnoty do pameti Flash");
+  USBSerial.println("FACTORY_RESET  *RST : Nastavi vychozi hodnoty a ulozi je");
+  USBSerial.println("HELP nebo ?  -h     : Vypise tuto napovedu");
+  USBSerial.println("-----------------------------------------------------------------------");
+  USBSerial.println("Prikazy lze retezit, napr: DECIMAL_SEPARATOR=, COLUMNS_SEPARATOR=; SAVE");
+
+  // Vypíšeme i aktuální stav
+  USBSerial.print("\nAKTUALNI STAV: ");
+  tiskni_parametry();
+}
+
+/**
+ * @brief Ověří hodnotu proti rozsahu a zapíše ji do cílové proměnné.
+ * * @tparam T Typ cílové proměnné (např. int, uint8_t).
+ * @param target Reference na proměnnou, která má být aktualizována.
+ * @param val Nová hodnota ke kontrole.
+ * @param min Minimální povolená hodnota.
+ * @param max Maximální povolená hodnota.
+ * @param name Název parametru pro chybový výpis.
+ * @param changed Příznak, který se nastaví na true při úspěšné změně.
+ * @param valid Příznak, který se nastaví na false při chybě rozsahu.
+ */
+template<typename T>
+void validateAndSet(T &target, long val, long min, long max, const char *name, bool &changed, bool &valid) {
+  if (val >= min && val <= max) {
+    target = (T)val;  // Přetypování na cílový typ (např. uint8_t)
+    changed = true;
+  } else {
+    USBSerial.printf("CHYBA: %s=%ld mimo rozsah (%ld-%ld)\n", name, val, min, max);
+    valid = false;
+  }
+}
+
+void tiskni_parametry(void) {
+  USBSerial.printf("SMIN=%d SMAX=%d INVERT=%d LMIN=%d LMAX=%d HMIN=%d HMAX=%d EMASK=%d ETIME=%d EQUNT=%d ETOUT=%d\n", s_min, s_max, invert_logic, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity, timeout_val);
+  USBSerial.printf("COLUMNS_SEPARATOR='%c', DECIMAL_SEPARATOR='%c'\n\n", columns_separator, decimal_separator);
 }
 
 
@@ -251,76 +338,6 @@ void setup() {
   USBSerial.println("HELP nebo ? nebo -h  : Vypise napovedu");
 }
 
-void tiskni_parametry(void) {
-  USBSerial.printf("Inv:%d S:%d-%d L:%d-%d H:%d-%d E_MASKA:%d E_MIN_TIME:%d E_QUNTITY:%d\n", invert_logic, s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity);
-  USBSerial.printf("Separatory: Sloupce='%c', Desetinny='%c'\n\n", columns_separator, decimal_separator);
-}
-
-void tiskni_help() {
-  USBSerial.println("\n--- HARDWARE MAPOVANI ---");
-
-  // Výpis vstupních pinů (Capture)
-  USBSerial.print("VSTUPNI  PINY (CH 0-5): ");
-  for (int i = 0; i < NUM_CHANNELS; i++) {
-    if (i > 0) USBSerial.print(", ");
-    if (INPUT_PINS[i] < 10) USBSerial.print(" ");
-    USBSerial.print(INPUT_PINS[i]);
-  }
-  USBSerial.println();
-
-  // Výpis výstupních pinů (Digital Out)
-  USBSerial.print("VYSTUPNI PINY (CH 0-5): ");
-  for (int i = 0; i < NUM_CHANNELS; i++) {
-    if (i > 0) USBSerial.print(", ");
-    if (OUTPUT_PINS[i] < 10) USBSerial.print(" ");
-    USBSerial.print(OUTPUT_PINS[i]);
-  }
-  USBSerial.println();
-
-  // Výpis Error pinu
-  USBSerial.printf("ERROR PIN: %d\n", ERROR_PIN);
-
-  USBSerial.println("\n--- SEZNAM PRIKAZU ---");
-  USBSerial.println("SMIN=n, SMAX=n      : Nastaveni spinaciho okna (Hystereze v ISR)");
-  USBSerial.println("LMIN=n, LMAX=n      : Validacni okno pro LOW signal (Error counting)");
-  USBSerial.println("HMIN=n, HMAX=n      : Validacni okno pro HIGH signal (Error counting)");
-  USBSerial.println("INVERT=0/1          : 0 = Logika HIGH, 1 = Logika LOW");
-  USBSerial.println("EMASK=n             : Bitova maska pro Error Pin (0-63, napr. 63=vse, 1=jen CH0)");
-  USBSerial.println("EQUNT=n             : Min pocet za sebou jdoucich detekci erroru nez se nastavi ERROR PIN (255-OFF)");
-  USBSerial.println("ETIME=n             : Min pocet [ms] indikace erroru");
-
-  USBSerial.println("\n--- FORMATOVANI A MERENI ---");
-  USBSerial.println("COLUMNS_SEPARATOR=c : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
-  USBSerial.println("DECIMAL_SEPARATOR=c : Znak pro desetinou carku (napr. . nebo ,)");
-  USBSerial.println("*IDN?               : Vypise IDN");
-  USBSerial.println(":MEAS:PER?          : Vypise periody vsech kanalu [s]");
-  USBSerial.println(":MEAS:WID?          : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
-
-  USBSerial.println("\n--- SYSTEMOVE ---");
-  USBSerial.println("SHOW                : Vypise aktualni nastaveni");
-  USBSerial.println("SAVE                : Ulozi aktualni hodnoty do pameti Flash");
-  USBSerial.println("FACTORY_RESET  *RST : Nastavi vychozi hodnoty a ulozi je");
-  USBSerial.println("HELP nebo ?  -h     : Vypise tuto napovedu");
-  USBSerial.println("-----------------------------------------------------------------------");
-  USBSerial.println("Prikazy lze retezit, napr: DECIMAL_SEPARATOR=, COLUMNS_SEPARATOR=; SAVE");
-
-  // Vypíšeme i aktuální stav
-  USBSerial.print("\nAKTUALNI STAV: ");
-  tiskni_parametry();
-}
-
-template<typename T>
-void validateAndSet(T &target, long val, long min, long max, const char *name, bool &changed, bool &valid) {
-  if (val >= min && val <= max) {
-    target = (T)val;  // Přetypování na cílový typ (např. uint8_t)
-    changed = true;
-  } else {
-    USBSerial.printf("CHYBA: %s=%ld mimo rozsah (%ld-%ld)\n", name, val, min, max);
-    valid = false;
-  }
-}
-
-
 void loop() {
   unsigned long nyni = millis();
   // 1. SERIOVA LINKA
@@ -336,8 +353,9 @@ void loop() {
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
-    uint32_t n_emask = e_maska, n_e_min_time = e_min_time;
+    uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_timeout_val = timeout_val;
     uint8_t n_e_quantity = e_quantity;
+    bool n_invert_logic = invert_logic;
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
     bool neznama_vyskyt = false;
     bool valid = true;
@@ -361,6 +379,9 @@ void loop() {
         } else if (key == "SMAX") {
           platny_token = true;
           validateAndSet(n_smax, val, 1, 1000000, "SMAX", neco_zmeneno, valid);
+        } else if (key == "INVERT") {
+          platny_token = true;
+          validateAndSet(n_invert_logic, val, 0, 1, "SMIN", neco_zmeneno, valid);
         } else if (key == "LMIN") {
           platny_token = true;
           validateAndSet(n_lmin, val, 0, 1000000, "LMIN", neco_zmeneno, valid);
@@ -373,25 +394,25 @@ void loop() {
         } else if (key == "HMAX") {
           platny_token = true;
           validateAndSet(n_hmax, val, 1, 1000000, "HMAX", neco_zmeneno, valid);
+        } else if (key == "EMASK") {
+          platny_token = true;
+          validateAndSet(n_emask, val, 0, 63, "EMASK", neco_zmeneno, valid);
         } else if (key == "ETIME") {
           platny_token = true;
           validateAndSet(n_e_min_time, val, 1, 10000, "ETIME", neco_zmeneno, valid);
         } else if (key == "EQUNT") {
           platny_token = true;
           validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
-        } else if (key == "EQUNT") {
+        } else if (key == "ETOUT") {
           platny_token = true;
-          validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
-        } else if (key == "EMASK") {
-          platny_token = true;
-          validateAndSet(n_emask, val, 0, 63, "EMASK", neco_zmeneno, valid);
-        } else if (key == "COLUMNS_SEPARATOR") {
+          validateAndSet(n_timeout_val, val, 1, 10000, "EQUNT", neco_zmeneno, valid);
+        } else if (key == "COLUMNS_SEPARATOR" || key == "CSEP") {
           if (valStr.length() > 0) {
             columns_separator = valStr[0];
             USBSerial.printf("OK: Separator nastaven na '%c'\n", columns_separator);
             platny_token = true;
           }
-        } else if (key == "DECIMAL_SEPARATOR") {
+        } else if (key == "DECIMAL_SEPARATOR" || key == "DSEP") {
           if (valStr.length() > 0) {
             decimal_separator = valStr[0];
             USBSerial.printf("OK: Desetinny oddelovac nastaven na '%c'\n", decimal_separator);
@@ -497,6 +518,7 @@ void loop() {
     }
 
     if (valid && (neco_zmeneno || do_save || do_show)) {
+      invert_logic = n_invert_logic;
       s_min = n_smin;
       s_max = n_smax;
       e_low_min = n_lmin;
@@ -505,7 +527,9 @@ void loop() {
       e_high_max = n_hmax;
       e_maska = n_emask;
       e_min_time = n_e_min_time;
+      timeout_val = n_timeout_val;
       e_quantity = n_e_quantity;
+
 
       if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
