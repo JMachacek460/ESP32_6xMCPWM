@@ -50,7 +50,7 @@ char columns_separator, decimal_separator;
 bool INVERT = false;            // zda je spusten error
 unsigned long alarm_start = 0;  // pomocna pro periodycke deje v loop
 
-// Definice globálně
+// definice globálně pro seriovou linku
 char vstupni_buf[128];
 int v_index = 0;
 bool data_komplet = false;
