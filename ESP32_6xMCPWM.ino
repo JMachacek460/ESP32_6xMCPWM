@@ -41,7 +41,7 @@ const int UNUSED_PINS[] = { 17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36,
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
 
-uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time;
+uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_filtr;
 uint8_t e_quantity;
 bool invert_logic = false;
 char columns_separator = ';';
@@ -63,19 +63,21 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
   // Ošetření přetečení 32-bitového čítače
   uint32_t diff = (now >= last_any_edge[ch]) ? (now - last_any_edge[ch]) : (0xFFFFFFFF - last_any_edge[ch] + now);
 
-  // FILTR: Pokud je změna stavu příliš rychlá (méně než 1us), ignoruj ji.
+  // FILTR: Pokud je změna stavu příliš rychlá (méně než např 1us), ignoruj ji.
   // To odfiltruje kmity, které prošly přes optočlen nebo RC filtr.
-  if (diff < 80) {
+  if (diff < e_filtr) {
     return false;
   }
   last_any_edge[ch] = now;
+  uint32_t t_time_out = 80000 * timeout_val;  // prevede na tiky
 
   BaseType_t high_task_wakeup = pdFALSE;
   if (edata->cap_edge == MCPWM_CAP_EDGE_POS) {
     uint32_t period_ticks = now - chStates[ch].pos_temp;
     uint32_t low_ticks = now - chStates[ch].neg_temp;
 
-    if (period_ticks > 8000000 || low_ticks > 8000000) {
+
+    if (period_ticks > t_time_out || low_ticks > t_time_out) {
       chStates[ch].pos_temp = now;
       return false;
     }
@@ -102,7 +104,7 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
     uint32_t high_ticks = now - chStates[ch].pos_temp;
     chStates[ch].neg_temp = now;
 
-    if (high_ticks > 8000000) return false;
+    if (high_ticks > t_time_out) return false;
     uint32_t high_us = high_ticks / 80;
 
     // POKUD NENÍ INVERT: Zajímá nás délka HIGH impulsu jako "aktivní" šířka
@@ -121,13 +123,14 @@ void setDefaults() {
   s_max = 12000;         // [us]
   e_low_min = 5000;      // [us]
   e_low_max = 8000;      // [us]
-  e_high_min = 12000;    // [us]
+  e_high_min = 13000;    // [us]
   e_high_max = 15000;    // [us]
   e_min_time = 800;      // [ms]
   e_quantity = 1;        // [0-255]
   e_maska = 1;           // [0-63]
   invert_logic = false;  // [0-1]
-  timeout_val = 500;     // [ms]
+  timeout_val = 100;     // [ms]
+  e_filtr = 80;          // [80tiku=1us]
 
   columns_separator = ';';
   decimal_separator = ',';
@@ -168,12 +171,14 @@ void loadSettings() {
   invert_logic = prefs.getBool("inv", false);
   e_maska = prefs.getUInt("emas", 1);
   timeout_val = prefs.getUInt("tout", 500);
+  e_filtr = prefs.getUInt("efil", 80);
   columns_separator = prefs.getChar("csep", ';');
   decimal_separator = prefs.getChar("dsep", ',');
 
   prefs.end();
   USBSerial.println("Konfigurace nactena (verze souhlasi).");
 }
+
 void saveSettings() {
   prefs.begin("pwm-cfg", false);
 
@@ -191,6 +196,7 @@ void saveSettings() {
   prefs.putBool("inv", invert_logic);
   prefs.putUInt("emas", e_maska);
   prefs.putUInt("tout", timeout_val);
+  prefs.putUInt("efil", e_filtr);
   prefs.putChar("csep", columns_separator);
   prefs.putChar("dsep", decimal_separator);
 
@@ -233,13 +239,14 @@ void tiskni_help() {
   USBSerial.println("EQUNT=n             : Min pocet za sebou jdoucich detekci erroru nez se nastavi ERROR PIN (255-OFF)");
   USBSerial.println("ETIME=n             : Min pocet [ms] indikace erroru");
   USBSerial.println("ETOUT=n             : Doba za jak dlouho bez signalu se vyhodnoti error a uz se na nic neceka [ms]");
+  USBSerial.println("EFILTR=n            : Kolik tiku musi trvat signal, aby byl vyhodnocovan [80=1us]");
 
   USBSerial.println("\n--- FORMATOVANI A MERENI ---");
-  USBSerial.println("COLUMNS_SEPARATOR=c CSEP=n : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
-  USBSerial.println("DECIMAL_SEPARATOR=c DSEP=n : Znak pro desetinou carku (napr. . nebo ,)\n");
+  USBSerial.println("Columns_SEParator=c CSEP=n : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
+  USBSerial.println("Decimal_SEParator=c DSEP=n : Znak pro desetinou carku (napr. . nebo ,)\n");
   USBSerial.println("*IDN?               : Vypise IDN");
-  USBSerial.println(":MEAS:PER?          : Vypise periody vsech kanalu [s]");
-  USBSerial.println(":MEAS:WID?          : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
+  USBSerial.println(":MEASure:PERiod?    : Vypise periody vsech kanalu [s]");
+  USBSerial.println(":MEASure:WIDth?     : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
 
   USBSerial.println("\n--- SYSTEMOVE ---");
   USBSerial.println("SHOW                : Vypise aktualni nastaveni");
@@ -277,10 +284,10 @@ void validateAndSet(T &target, long val, long min, long max, const char *name, b
 }
 
 void tiskni_parametry(void) {
-  USBSerial.printf("SMIN=%d SMAX=%d INVERT=%d LMIN=%d LMAX=%d HMIN=%d HMAX=%d EMASK=%d ETIME=%d EQUNT=%d ETOUT=%d\n", s_min, s_max, invert_logic, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity, timeout_val);
+  USBSerial.printf("SMIN=%d SMAX=%d INVERT=%d LMIN=%d LMAX=%d HMIN=%d HMAX=%d EMASK=%d ETIME=%d EQUNT=%d ETOUT=%d EFILTR=%d\n",
+                   s_min, s_max, invert_logic, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_quantity, timeout_val, e_filtr);
   USBSerial.printf("COLUMNS_SEPARATOR='%c', DECIMAL_SEPARATOR='%c'\n\n", columns_separator, decimal_separator);
 }
-
 
 void setup() {
   // 1. EMC Ošetření nepoužitých pinů
@@ -353,7 +360,7 @@ void loop() {
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
-    uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_timeout_val = timeout_val;
+    uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_timeout_val = timeout_val, n_e_filtr = e_filtr;
     uint8_t n_e_quantity = e_quantity;
     bool n_invert_logic = invert_logic;
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
@@ -365,7 +372,6 @@ void loop() {
       String token = String(p);
       token.toUpperCase();
       bool platny_token = false;
-
       int sep = token.indexOf('=');
 
       if (sep != -1) {
@@ -406,6 +412,9 @@ void loop() {
         } else if (key == "ETOUT") {
           platny_token = true;
           validateAndSet(n_timeout_val, val, 1, 10000, "EQUNT", neco_zmeneno, valid);
+        } else if (key == "EFILTR") {
+          platny_token = true;
+          validateAndSet(n_e_filtr, val, 0, 80000, "EFILTR", neco_zmeneno, valid);
         } else if (key == "COLUMNS_SEPARATOR" || key == "CSEP") {
           if (valStr.length() > 0) {
             columns_separator = valStr[0];
@@ -438,53 +447,41 @@ void loop() {
           platny_token = true;
           USBSerial.printf("Detekce az 6 kanalu PWM s ESP32-S3 %s\n", VERSION);
         } else if (token == ":MEAS:PER?" || token == ":MEASURE:PERIOD?") {
-
           for (int i = 0; i < NUM_CHANNELS; i++) {
             // Čteme přímo z paměti stavu kanálu, ne z fronty
             uint32_t p_us = chStates[i].last_period_us;
-
             // Pokud je kanál v timeoutu (signál zmizel), vynulujeme to
             if (nyni - chStates[i].last_seen > timeout_val) {
               p_us = 0;
             }
-
             float p_sec = p_us / 1000000.0f;
             String s_val = String(p_sec, 6);
             s_val.replace('.', decimal_separator);
-
             USBSerial.print(s_val);
-
             if (i < NUM_CHANNELS - 1) {
               USBSerial.print(columns_separator);
               if (columns_separator == ';') USBSerial.print(" ");
             }
           }
           USBSerial.println();
-
           platny_token = true;
         } else if (token == ":MEAS:WID?" || token == ":MEASURE:WIDTH?") {
-
           for (int i = 0; i < NUM_CHANNELS; i++) {
             uint32_t w_us = chStates[i].last_width_us;
-
             // Timeout pojistka
             if (nyni - chStates[i].last_seen > timeout_val) {
               w_us = 0;
             }
-
             float w_sec = w_us / 1000000.0f;
             String s_val = String(w_sec, 6);
             s_val.replace('.', decimal_separator);
-
             USBSerial.print(s_val);
-
             if (i < NUM_CHANNELS - 1) {
               USBSerial.print(columns_separator);
               if (columns_separator == ';') USBSerial.print(" ");
             }
           }
           USBSerial.println();
-
           platny_token = true;
         }
       }
@@ -500,7 +497,6 @@ void loop() {
       tiskni_help();
       return;
     }
-
 
     if (neco_zmeneno) {
       if (n_smin >= n_smax) {
@@ -529,11 +525,11 @@ void loop() {
       e_min_time = n_e_min_time;
       timeout_val = n_timeout_val;
       e_quantity = n_e_quantity;
-
+      e_filtr = n_e_filtr;
 
       if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
-      if (do_show) tiskni_parametry();  // Předpokládám, že tiskni_parametry je vaše SHOW funkce
+      if (do_show) tiskni_parametry();
     } else if (!valid) {
       USBSerial.println("Zmeny zamitnuty.");
     }
