@@ -36,20 +36,19 @@ const int OUTPUT_PINS[NUM_CHANNELS] = { 10, 11, 12, 13, 1, 2 };
 const int ERROR_PIN = 21;
 // Seznam zbývajících volných pinů pro EMC stabilitu
 const int UNUSED_PINS[] = { 17, 18, 8, 3, 46, 9, 14, 42, 41, 40, 39, 38, 37, 36, 35, 45, 48, 47 };
-//const int UNUSED_PINS[] = {3, 8, 9, 14, 17, 18, 33, 34, 35, 36, 37, 38, 43, 44, 45, 46, 47, 48};
 
 QueueHandle_t pwmQueues[NUM_CHANNELS];
 ChannelState chStates[NUM_CHANNELS];
 
-uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_filtr;
+// promene nastavitelne prikazem po seriove lince lze nastavit na tovarni nastaveni pomoci setDefaults()
+uint32_t s_min, s_max, e_low_min, e_low_max, e_high_min, e_high_max, e_maska, e_min_time, e_filtr, timeout_val;
 uint8_t e_quantity;
-bool invert_logic = false;
-char columns_separator = ';';
-char decimal_separator = ',';
-uint32_t timeout_val = 500;
+bool invert_logic;
+char columns_separator, decimal_separator;
 
-bool alarm_active = false;
-unsigned long alarm_start = 0;
+// pro loop
+bool INVERT = false;            // zda je spusten error
+unsigned long alarm_start = 0;  // pomocna pro periodycke deje v loop
 
 // --- ISR CALLBACK (Plnění fronty) ---
 static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm_capture_event_data_t *edata, void *user_data) {
@@ -349,115 +348,116 @@ void loop() {
   unsigned long nyni = millis();
   // 1. SERIOVA LINKA
   if (USBSerial.available()) {
-    // USBSerial místo Serial
-    String input = USBSerial.readStringUntil('\n');
-    input.trim();
-    if (input.length() == 0) return;
-
     char buf[128];
-    input.toCharArray(buf, sizeof(buf));
+    // Přímé čtení do bufferu bez mezikroku se Stringem
+    int len = USBSerial.readBytesUntil('\n', buf, sizeof(buf) - 1);
+    if (len == 0) return;
+    buf[len] = '\0';  // Nutné pro správné ukončení řetězce
 
+    // Lokální kopie pro transakční zpracování
     uint32_t n_smin = s_min, n_smax = s_max;
     uint32_t n_lmin = e_low_min, n_lmax = e_low_max;
     uint32_t n_hmin = e_high_min, n_hmax = e_high_max;
     uint32_t n_emask = e_maska, n_e_min_time = e_min_time, n_timeout_val = timeout_val, n_e_filtr = e_filtr;
     uint8_t n_e_quantity = e_quantity;
     bool n_invert_logic = invert_logic;
+
     bool do_save = false, do_show = false, do_help = false, neco_zmeneno = false;
-    bool neznama_vyskyt = false;
     bool valid = true;
+
     char *p = strtok(buf, " ");
-
     while (p != NULL) {
-      String token = String(p);
-      token.toUpperCase();
       bool platny_token = false;
-      int sep = token.indexOf('=');
+      char *sep = strchr(p, '=');  // Najde pozici '=' v aktuálním slově
 
-      if (sep != -1) {
-        String key = token.substring(0, sep);
-        String valStr = token.substring(sep + 1);
-        uint32_t val = valStr.toInt();
+      if (sep != NULL) {
+        // ROZDĚLENÍ NA KLÍČ A HODNOTU (přímo v bufferu)
+        *sep = '\0';  // Rozdělí řetězec na dvě části (klíč a hodnota)
+        char *key = p;
+        char *valStr = sep + 1;
+        long val = atol(valStr);  // Převod na číslo
 
-        if (key == "SMIN") {
+        // Porovnání klíčů bez ohledu na velikost písmen (Case Insensitive)
+        if (strcasecmp(key, "SMIN") == 0) {
           platny_token = true;
           validateAndSet(n_smin, val, 0, 1000000, "SMIN", neco_zmeneno, valid);
-        } else if (key == "SMAX") {
+        } else if (strcasecmp(key, "SMAX") == 0) {
           platny_token = true;
           validateAndSet(n_smax, val, 1, 1000000, "SMAX", neco_zmeneno, valid);
-        } else if (key == "INVERT") {
+        } else if (strcasecmp(key, "INVERT") == 0) {
           platny_token = true;
-          validateAndSet(n_invert_logic, val, 0, 1, "SMIN", neco_zmeneno, valid);
-        } else if (key == "LMIN") {
+          validateAndSet(n_invert_logic, val, 0, 1, "INVERT", neco_zmeneno, valid);
+        } else if (strcasecmp(key, "LMIN") == 0) {
           platny_token = true;
           validateAndSet(n_lmin, val, 0, 1000000, "LMIN", neco_zmeneno, valid);
-        } else if (key == "LMAX") {
+        } else if (strcasecmp(key, "LMAX") == 0) {
           platny_token = true;
           validateAndSet(n_lmax, val, 1, 1000000, "LMAX", neco_zmeneno, valid);
-        } else if (key == "HMIN") {
+        } else if (strcasecmp(key, "HMIN") == 0) {
           platny_token = true;
           validateAndSet(n_hmin, val, 0, 1000000, "HMIN", neco_zmeneno, valid);
-        } else if (key == "HMAX") {
+        } else if (strcasecmp(key, "HMAX") == 0) {
           platny_token = true;
           validateAndSet(n_hmax, val, 1, 1000000, "HMAX", neco_zmeneno, valid);
-        } else if (key == "EMASK") {
+        } else if (strcasecmp(key, "EMASK") == 0) {
           platny_token = true;
           validateAndSet(n_emask, val, 0, 63, "EMASK", neco_zmeneno, valid);
-        } else if (key == "ETIME") {
+        } else if (strcasecmp(key, "ETIME") == 0) {
           platny_token = true;
           validateAndSet(n_e_min_time, val, 1, 10000, "ETIME", neco_zmeneno, valid);
-        } else if (key == "EQUNT") {
+        } else if (strcasecmp(key, "EQUNT") == 0) {
           platny_token = true;
           validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
-        } else if (key == "ETOUT") {
+        } else if (strcasecmp(key, "ETOUT") == 0) {
           platny_token = true;
-          validateAndSet(n_timeout_val, val, 1, 10000, "EQUNT", neco_zmeneno, valid);
-        } else if (key == "EFILTR") {
+          validateAndSet(n_timeout_val, val, 1, 10000, "ETOUT", neco_zmeneno, valid);
+        } else if (strcasecmp(key, "EFILTR") == 0) {
           platny_token = true;
           validateAndSet(n_e_filtr, val, 0, 80000, "EFILTR", neco_zmeneno, valid);
-        } else if (key == "COLUMNS_SEPARATOR" || key == "CSEP") {
-          if (valStr.length() > 0) {
+        } else if (strcasecmp(key, "CSEP") == 0 || strcasecmp(key, "COLUMNS_SEPARATOR") == 0) {
+          if (strlen(valStr) > 0) {
             columns_separator = valStr[0];
             USBSerial.printf("OK: Separator nastaven na '%c'\n", columns_separator);
             platny_token = true;
           }
-        } else if (key == "DECIMAL_SEPARATOR" || key == "DSEP") {
-          if (valStr.length() > 0) {
+        } else if (strcasecmp(key, "DSEP") == 0 || strcasecmp(key, "DECIMAL_SEPARATOR") == 0) {
+          if (strlen(valStr) > 0) {
             decimal_separator = valStr[0];
             USBSerial.printf("OK: Desetinny oddelovac nastaven na '%c'\n", decimal_separator);
             platny_token = true;
           }
         }
       } else {
-        if (token == "SAVE") {
+        // PŘÍKAZY BEZ "="
+        if (strcasecmp(p, "SAVE") == 0) {
           do_save = true;
           platny_token = true;
-        } else if (token == "SHOW") {
+        } else if (strcasecmp(p, "SHOW") == 0) {
           do_show = true;
           platny_token = true;
-        } else if (token == "HELP" || token == "?" || token == "-H") {
+        } else if (strcasecmp(p, "HELP") == 0 || strcmp(p, "?") == 0 || strcasecmp(p, "-H") == 0) {
           do_help = true;
           platny_token = true;
-        } else if (token == "FACTORY_RESET" || token == "*RST") {
+        } else if (strcasecmp(p, "FACTORY_RESET") == 0 || strcasecmp(p, "*RST") == 0) {
           setDefaults();
           saveSettings();
+          USBSerial.println("OK: Proveden kompletni reset.");
           platny_token = true;
-          USBSerial.println("OK: Proveden kompletni reset nastaveni.");
-        } else if (token == "*IDN?") {
+        } else if (strcasecmp(p, "*IDN?") == 0) {
+          USBSerial.printf("PWM Detektor ESP32-S3 %s\n", VERSION);
           platny_token = true;
-          USBSerial.printf("Detekce az 6 kanalu PWM s ESP32-S3 %s\n", VERSION);
-        } else if (token == ":MEAS:PER?" || token == ":MEASURE:PERIOD?") {
+        } else if (strcasecmp(p, ":MEAS:PER?") == 0 || strcasecmp(p, ":MEASURE:PERIOD?") == 0) {
           for (int i = 0; i < NUM_CHANNELS; i++) {
-            // Čteme přímo z paměti stavu kanálu, ne z fronty
-            uint32_t p_us = chStates[i].last_period_us;
-            // Pokud je kanál v timeoutu (signál zmizel), vynulujeme to
-            if (nyni - chStates[i].last_seen > timeout_val) {
-              p_us = 0;
-            }
+            uint32_t p_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_period_us;
             float p_sec = p_us / 1000000.0f;
-            String s_val = String(p_sec, 6);
-            s_val.replace('.', decimal_separator);
-            USBSerial.print(s_val);
+
+            // Efektivní tisk s nahrazením tečky za tvůj oddělovač
+            char fbuf[16];
+            snprintf(fbuf, sizeof(fbuf), "%.6f", p_sec);
+            char *dot = strchr(fbuf, '.');
+            if (dot) *dot = decimal_separator;
+
+            USBSerial.print(fbuf);
             if (i < NUM_CHANNELS - 1) {
               USBSerial.print(columns_separator);
               if (columns_separator == ';') USBSerial.print(" ");
@@ -465,17 +465,18 @@ void loop() {
           }
           USBSerial.println();
           platny_token = true;
-        } else if (token == ":MEAS:WID?" || token == ":MEASURE:WIDTH?") {
+        } else if (strcasecmp(p, ":MEAS:WID?") == 0 || strcasecmp(p, ":MEASURE:WIDTH?") == 0) {
           for (int i = 0; i < NUM_CHANNELS; i++) {
-            uint32_t w_us = chStates[i].last_width_us;
-            // Timeout pojistka
-            if (nyni - chStates[i].last_seen > timeout_val) {
-              w_us = 0;
-            }
-            float w_sec = w_us / 1000000.0f;
-            String s_val = String(w_sec, 6);
-            s_val.replace('.', decimal_separator);
-            USBSerial.print(s_val);
+            uint32_t p_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_width_us;
+            float p_sec = p_us / 1000000.0f;
+
+            // Efektivní tisk s nahrazením tečky za tvůj oddělovač
+            char fbuf[16];
+            snprintf(fbuf, sizeof(fbuf), "%.6f", p_sec);
+            char *dot = strchr(fbuf, '.');
+            if (dot) *dot = decimal_separator;
+
+            USBSerial.print(fbuf);
             if (i < NUM_CHANNELS - 1) {
               USBSerial.print(columns_separator);
               if (columns_separator == ';') USBSerial.print(" ");
@@ -484,36 +485,30 @@ void loop() {
           USBSerial.println();
           platny_token = true;
         }
+        
       }
 
       if (!platny_token) {
         USBSerial.printf("Neznamy prikaz: %s\n", p);
-        neznama_vyskyt = true;
       }
       p = strtok(NULL, " ");
     }
 
-    if (do_help) {
-      tiskni_help();
-      return;
-    }
-
-    if (neco_zmeneno) {
-      if (n_smin >= n_smax) {
-        USBSerial.println("CHYBA: SMIN >= SMAX!");
-        valid = false;
-      }
-      if (n_lmin >= n_lmax) {
-        USBSerial.println("CHYBA: LMIN >= LMAX!");
-        valid = false;
-      }
-      if (n_hmin >= n_hmax) {
-        USBSerial.println("CHYBA: HMIN >= HMAX!");
+    // FINÁLNÍ KONTROLA LOGIKY (Cross-parameter validation)
+    if (valid && neco_zmeneno) {
+      if (n_smin >= n_smax || n_lmin >= n_lmax || n_hmin >= n_hmax) {
+        USBSerial.println("CHYBA: Min >= Max!");
         valid = false;
       }
     }
 
-    if (valid && (neco_zmeneno || do_save || do_show)) {
+    // ZÁPIS DO OSTRÝCH PROMĚNNÝCH
+    if (valid && (neco_zmeneno || do_save || do_show || do_help)) {
+      if (do_help) {
+        tiskni_help();
+        return;
+      }
+
       invert_logic = n_invert_logic;
       s_min = n_smin;
       s_max = n_smax;
@@ -530,10 +525,9 @@ void loop() {
       if (neco_zmeneno) USBSerial.println("OK: Hodnoty aktualizovany.");
       if (do_save) saveSettings();
       if (do_show) tiskni_parametry();
-    } else if (!valid) {
-      USBSerial.println("Zmeny zamitnuty.");
     }
   }
+  
   //********************************************************************************************************
   // 2. KONTROLA DAT Z FRONTY
   nyni = millis();
@@ -583,14 +577,14 @@ void loop() {
     last_slow_task = nyni;
 
     if (any_err) {
-      if (!alarm_active) {
+      if (!INVERT) {
         digitalWrite(ERROR_PIN, HIGH);
-        alarm_active = true;
+        INVERT = true;
         alarm_start = nyni;
       }
-    } else if (alarm_active && (nyni - alarm_start > e_min_time)) {
+    } else if (INVERT && (nyni - alarm_start > e_min_time)) {
       digitalWrite(ERROR_PIN, LOW);
-      alarm_active = false;
+      INVERT = false;
     }
   }
 }
