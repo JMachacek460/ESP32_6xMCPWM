@@ -47,7 +47,7 @@ bool invert_logic;
 char columns_separator, decimal_separator;
 
 // pro loop
-bool INVERT = false;            // zda je spusten error
+bool ERROR_BEZI = false;            // zda je spusten error
 unsigned long alarm_start = 0;  // pomocna pro periodycke deje v loop
 
 // definice globálně pro seriovou linku
@@ -174,7 +174,7 @@ void loadSettings() {
   e_quantity = prefs.getUInt("equn", 800);
   invert_logic = prefs.getBool("inv", false);
   e_maska = prefs.getUInt("emas", 1);
-  timeout_val = prefs.getUInt("tout", 500);
+  timeout_val = prefs.getUInt("tout", 100);
   e_filtr = prefs.getUInt("efil", 80);
   columns_separator = prefs.getChar("csep", ';');
   decimal_separator = prefs.getChar("dsep", ',');
@@ -372,7 +372,7 @@ void zpracujSerial() {
         validateAndSet(n_e_quantity, val, 0, 255, "EQUNT", neco_zmeneno, valid);
       } else if (strcasecmp(key, "ETOUT") == 0) {
         platny_token = true;
-        validateAndSet(n_timeout_val, val, 1, 10000, "ETOUT", neco_zmeneno, valid);
+        validateAndSet(n_timeout_val, val, 1, 65000, "ETOUT", neco_zmeneno, valid);
       } else if (strcasecmp(key, "EFILTR") == 0) {
         platny_token = true;
         validateAndSet(n_e_filtr, val, 0, 80000, "EFILTR", neco_zmeneno, valid);
@@ -410,8 +410,8 @@ void zpracujSerial() {
         platny_token = true;
       } else if (strcasecmp(p, ":MEAS:PER?") == 0 || strcasecmp(p, ":MEASURE:PERIOD?") == 0) {
         for (int i = 0; i < NUM_CHANNELS; i++) {
-          uint32_t p_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_period_us;
-          float p_sec = p_us / 1000000.0f;
+          uint32_t p_perioda_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_period_us;
+          float p_sec = p_perioda_us / 1000000.0f;
 
           // Efektivní tisk s nahrazením tečky za tvůj oddělovač
           char fbuf[16];
@@ -429,10 +429,10 @@ void zpracujSerial() {
         platny_token = true;
       } else if (strcasecmp(p, ":MEAS:WID?") == 0 || strcasecmp(p, ":MEASURE:WIDTH?") == 0) {
         for (int i = 0; i < NUM_CHANNELS; i++) {
-          uint32_t p_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_width_us;
-          float p_sec = p_us / 1000000.0f;
+          uint32_t p_width_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_width_us;
+          float p_sec = p_width_us / 1000000.0f;
 
-          // Efektivní tisk s nahrazením tečky za tvůj oddělovač
+          // Efektivní tisk s nahrazením tečky za muj oddělovač
           char fbuf[16];
           snprintf(fbuf, sizeof(fbuf), "%.6f", p_sec);
           char *dot = strchr(fbuf, '.');
@@ -546,16 +546,15 @@ void setup() {
 }
 
 void loop() {
-  unsigned long nyni = millis();
+  //********************************************************************************************************
   // 1. SERIOVA LINKA
   nactiSerial();
-
   // pokud byl načten kompletni retezec tak se zpracuje
   if (data_komplet) { zpracujSerial(); }
 
   //********************************************************************************************************
   // 2. KONTROLA DAT Z FRONTY
-  nyni = millis();
+  unsigned long nyni = millis();
   bool any_err = false;
   PwmData data;
 
@@ -602,14 +601,16 @@ void loop() {
     last_slow_task = nyni;
 
     if (any_err) {
-      if (!INVERT) {
+      if (!ERROR_BEZI) {
         digitalWrite(ERROR_PIN, HIGH);
-        INVERT = true;
+        log_w("Nastaven Error\n");
+        ERROR_BEZI = true;
         alarm_start = nyni;
       }
-    } else if (INVERT && (nyni - alarm_start > e_min_time)) {
+    } else if (ERROR_BEZI && (nyni - alarm_start > e_min_time)) {
       digitalWrite(ERROR_PIN, LOW);
-      INVERT = false;
+      log_w("Vypnut Error\n");
+      ERROR_BEZI = false;
     }
   }
 }
