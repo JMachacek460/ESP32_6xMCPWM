@@ -65,7 +65,8 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
 
   // Výpočet rozdílu v tiktech (80 tiků = 1us)
   // Ošetření přetečení 32-bitového čítače
-  uint32_t diff = (now >= last_any_edge[ch]) ? (now - last_any_edge[ch]) : (0xFFFFFFFF - last_any_edge[ch] + now);
+  // uint32_t diff = (now >= last_any_edge[ch]) ? (now - last_any_edge[ch]) : (0xFFFFFFFF - last_any_edge[ch] + now);
+  uint32_t diff = now - last_any_edge[ch]; 
 
   // FILTR: Pokud je změna stavu příliš rychlá (méně než např 1us), ignoruj ji.
   // To odfiltruje kmity, které prošly přes optočlen nebo RC filtr.
