@@ -566,28 +566,32 @@ void loop() {
   //********************************************************************************************************
   // 2. KONTROLA DAT Z FRONTY
   unsigned long nyni = millis();
-  bool any_err = false;
+  static bool any_err = false;
   PwmData data;
 
   for (int i = 0; i < NUM_CHANNELS; i++) {
     // Zkusíme vyzvednout data z fronty (nečekáme)
     if (xQueueReceive(pwmQueues[i], &data, 0) == pdTRUE) {
       chStates[i].last_seen = nyni;
-      uint32_t val = invert_logic ? data.low_us : data.high_us;
+      //uint32_t val1 = invert_logic ? data.low_us : data.high_us;
+      //uint32_t val2 = invert_logic ? data.high_us : data.low_us;
 
       // Validace
-      bool valid = (val >= e_low_min && val <= e_low_max) || (val >= e_high_min && val <= e_high_max);
+      //bool valid = (val >= e_low_min && val <= e_low_max) || (val >= e_high_min && val <= e_high_max);
+      bool valid = ((data.low_us >= e_low_min && data.low_us <= e_low_max) || (data.low_us >= e_high_min && data.low_us <= e_high_max)) && ((data.high_us >= e_low_min && data.high_us <= e_low_max) || (data.high_us >= e_high_min && data.high_us <= e_high_max));
+
       if (valid) {
         if (chStates[i].error_count > 0) chStates[i].error_count = 0;  //chStates[i].error_count--
       } else {
         if (chStates[i].error_count < MAX_ERROR_COUNT) chStates[i].error_count++;
+        log_d("CH%d: P:%u H:%u L:%u Err:%d", i, data.period_us, data.high_us, data.low_us, chStates[i].error_count);
       }
 
-      static unsigned long last_log = 0;
-      if (nyni - last_log > 2000) {
-        log_d("CH%d: P:%u H:%u L:%u Err:%d", i, data.period_us, data.high_us, data.low_us, chStates[i].error_count);
-        if (i == 5) last_log = nyni;
-      }
+      // static unsigned long last_log = 0;
+      // if (nyni - last_log > 2000) {
+      //   log_d("CH%d: P:%u H:%u L:%u Err:%d", i, data.period_us, data.high_us, data.low_us, chStates[i].error_count);
+      //   if (i == 5) last_log = nyni;
+      // }
     } else {
       // Pokud ve frontě dlouho nic nebylo -> Timeout
       if (nyni - chStates[i].last_seen > timeout_val) {
@@ -612,6 +616,7 @@ void loop() {
     last_slow_task = nyni;
 
     if (any_err) {
+      any_err=false;
       if (!ERROR_BEZI) {
         digitalWrite(ERROR_PIN, HIGH);
         g_error_count++;
