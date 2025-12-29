@@ -47,8 +47,9 @@ bool invert_logic;
 char columns_separator, decimal_separator;
 
 // pro loop
-bool ERROR_BEZI = false;            // zda je spusten error
+bool ERROR_BEZI = false;        // zda je spusten error
 unsigned long alarm_start = 0;  // pomocna pro periodycke deje v loop
+uint32_t g_error_count = 0;     // kolik bylo zaznamenáno erroru od startu nebo *cls
 
 // definice globálně pro seriovou linku
 char vstupni_buf[128];
@@ -66,7 +67,7 @@ static bool on_capture_callback(mcpwm_cap_channel_handle_t cap_chan, const mcpwm
   // Výpočet rozdílu v tiktech (80 tiků = 1us)
   // Ošetření přetečení 32-bitového čítače
   // uint32_t diff = (now >= last_any_edge[ch]) ? (now - last_any_edge[ch]) : (0xFFFFFFFF - last_any_edge[ch] + now);
-  uint32_t diff = now - last_any_edge[ch]; 
+  uint32_t diff = now - last_any_edge[ch];
 
   // FILTR: Pokud je změna stavu příliš rychlá (méně než např 1us), ignoruj ji.
   // To odfiltruje kmity, které prošly přes optočlen nebo RC filtr.
@@ -248,8 +249,10 @@ void tiskni_help() {
   USBSerial.println("Columns_SEParator=c CSEP=n : Znak pro oddeleni sloupcu (napr. ; nebo ,)");
   USBSerial.println("Decimal_SEParator=c DSEP=n : Znak pro desetinou carku (napr. . nebo ,)\n");
   USBSerial.println("*IDN?               : Vypise IDN");
+  USBSerial.println("*CLS                : Vynuluje pocitadlo erroru");
   USBSerial.println(":MEASure:PERiod?    : Vypise periody vsech kanalu [s]");
   USBSerial.println(":MEASure:WIDth?     : Vypise sirku aktivniho pulzu [s] (dle INVERT)");
+  USBSerial.println("SYSTem:ERRor:COUNt? : Vypise pocet erroru od startu nebo *CLS");
 
   USBSerial.println("\n--- SYSTEMOVE ---");
   USBSerial.println("SHOW                : Vypise aktualni nastaveni");
@@ -409,6 +412,9 @@ void zpracujSerial() {
       } else if (strcasecmp(p, "*IDN?") == 0) {
         USBSerial.printf("PWM Detektor ESP32-S3 %s\n", VERSION);
         platny_token = true;
+      } else if (strcasecmp(p, "*CLS") == 0) {
+        g_error_count = 0;
+        platny_token = true;
       } else if (strcasecmp(p, ":MEAS:PER?") == 0 || strcasecmp(p, ":MEASURE:PERIOD?") == 0) {
         for (int i = 0; i < NUM_CHANNELS; i++) {
           uint32_t p_perioda_us = (millis() - chStates[i].last_seen > n_timeout_val) ? 0 : chStates[i].last_period_us;
@@ -446,6 +452,10 @@ void zpracujSerial() {
           }
         }
         USBSerial.println();
+        platny_token = true;
+      } else if (strcasecmp(p, "SYSTEM:ERROR:COUNT?") == 0 || strcasecmp(p, "SYST:ERR:COUN?") == 0) {
+        //USBSerial.println(g_error_count);
+        USBSerial.println(g_error_count);
         platny_token = true;
       }
     }
@@ -604,6 +614,7 @@ void loop() {
     if (any_err) {
       if (!ERROR_BEZI) {
         digitalWrite(ERROR_PIN, HIGH);
+        g_error_count++;
         log_w("Nastaven Error\n");
         ERROR_BEZI = true;
         alarm_start = nyni;
